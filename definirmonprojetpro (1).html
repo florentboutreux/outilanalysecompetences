@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outil Conseiller - Projet Professionnel</title>
+    
+    <!-- Sources fiables (CDNJS) pour éviter les blocages -->
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome & Fonts -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Importation de PDF.js pour la lecture locale des CV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Configuration du worker PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        ft: { blue: '#252e6f', red: '#e1000f', light: '#f2f6fa' }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Styles spécifiques pour les outils */
+        .tool-link { transition: all 0.2s; border-left: 3px solid #252e6f; }
+        .tool-link:hover { transform: translateX(2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .tool-static { border-left: 3px solid #cbd5e1; background-color: #f1f5f9; opacity: 0.8; }
+
+        /* Animation pour le contenu de la modale */
+        .modal-enter { animation: modalSlideIn 0.3s ease-out forwards; }
+        @keyframes modalSlideIn {
+            from { opacity: 0; transform: translateY(20px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 h-screen overflow-hidden flex flex-col">
+
+    <div id="root" class="h-full flex flex-col"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        const apiKey = ""; // API Key injectée par l'environnement
+        const MODEL_NAME = 'gemini-2.5-flash-preview-09-2025';
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
+
+        // --- DONNÉES (QUESTIONS STRICTEMENT IDENTIQUES AU PDF) ---
+        const DATA = {
+            situation_globale: {
+                id: 'situation_globale', pillar: "1. MON DIAGNOSTIC", title: "Ma Situation Globale", icon: "fa-solid fa-user-doctor", color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200", 
+                description: "Santé, famille, disponibilité, freins et leviers personnels.",
+                subsections: [
+                    { title: "Santé & Handicap", icon: "fa-solid fa-notes-medical", questions: [
+                        "RQTH ? Etes-vous DEBOE ?",
+                        "Contre-indications (postures à éviter..., environnements, allergies...) ?",
+                        "Difficulté déclarée entravant l'exercice de certains métiers",
+                        "Accès ou mise à jour de la couverture sécurité sociale et/ou mutuelle",
+                        "Difficulté déclarée ne permettant plus d'exercer une activité professionnelle",
+                        "Difficulté déclarée ne permettant pas de reprendre une activité professionnelle immédiate",
+                        "Difficulté déclarée entraînant des absences régulières",
+                        "Difficulté déclarée concernant l'accès à un professionnel de santé",
+                        "Existence d'un dossier MDPH ou BOETH",
+                        "Difficulté liée à une situation de handicap",
+                        "Difficulté à prendre conscience de la problématique de santé et/ou de handicap",
+                        "Difficulté à intégrer la situation de santé et/ou de handicap dans son parcours"
+                    ], tools: [{ label: "Cap Emploi", url: "https://www.capemploi.net/" }, { label: "Prestation PAS", url: "https://www.francetravail.fr/" }, { label: "Formation courte TH", url: "https://www.francetravail.fr/" }, { label: "Regards Croisés", url: "https://www.francetravail.fr/" }, { label: "Accompagnement LUA", url: "https://www.francetravail.fr/" }] },
+                    { title: "Famille & Contraintes", icon: "fa-solid fa-people-roof", questions: [
+                        "Commune d'habitation",
+                        "Situation personnelle, familiale",
+                        "Obligation(s) personnelle(s)",
+                        "Situation financière (allocation, laquelle, durée etc....)",
+                        "Soutien au projet ou/et à la réalisation du projet ?",
+                        "Enfant(s) en situation de handicap",
+                        "Contraintes horaires",
+                        "Aidant (s'occuper d'un proche)",
+                        "Autres contraintes familiales à prendre en compte",
+                        "Enfant(s) de moins de 3 ans sans solution de garde",
+                        "Attend un enfant ou plus",
+                        "Problématique de santé d'un enfant",
+                        "Manque de lien familial et social"
+                    ], tools: [{ label: "Aide Garde d'Enfant", url: "https://www.francetravail.fr/" }, { label: "Mes Aides", url: "https://www.francetravail.fr/" }, { label: "GMO Métiers/Loisirs", url: "#" }, { label: "GMO Réseau", url: "#" }] },
+                    { title: "Disponibilité", icon: "fa-solid fa-clock", questions: [
+                        "Combien de temps pouvez-vous réellement consacrer à l'élaboration de votre projet professionnel? Chaque semaine ? Chaque jour ?",
+                        "Quels sont vos autres engagements (personnels, familiaux, professionnels) susceptibles d'influencer cette disponibilité ?",
+                        "Ce projet fait-il partie de vos priorités actuelles ?",
+                        "Pouvez-vous vous organiser pour libérer du temps pour ce projet ?",
+                        "Etes-vous dans une période où vous avez l'énergie nécessaire pour vous impliquer pleinement dans ce travail de réflexion et de construction ?",
+                        "Qu'est-ce qui pourrait renforcer votre motivation ou, au contraire, la freiner ?"
+                    ], tools: [{ label: "Mon Agenda", url: "https://candidat.francetravail.fr/espaceperso/" }, { label: "Atelier Organiser", url: "https://www.francetravail.fr/" }] }
+                ]
+            },
+            mobilite: {
+                id: 'mobilite', pillar: "1. MON DIAGNOSTIC", title: "Mes Freins Mobilité", icon: "fa-solid fa-route", color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200",
+                description: "Transport, logement et périmètre géographique.",
+                subsections: [
+                    { title: "Transport", icon: "fa-solid fa-bus", questions: [
+                        "Comment vous déplacez-vous ?",
+                        "Quelle est votre mobilité géographique pour vous rendre à une formation ?",
+                        "Connaissez-vous les dispositifs / moyens de transports pour vous déplacez?",
+                        "Connaissez-vous les aides financières pour accéder à un moyen de transport?"
+                    ], tools: [{ label: "Bilan Mobilité", url: "https://lozeremobilite.fr/" }, { label: "Rome2Rio", url: "https://www.rome2rio.com/" }, { label: "Aide permis B", url: "https://www.francetravail.fr/" }, { label: "DORA", url: "https://dora.inclusion.beta.gouv.fr/" }] },
+                    { title: "Logement", icon: "fa-solid fa-house", questions: [
+                        "Vous êtes locataire ? Propriétaire ? Hébergé ?",
+                        "Avez-vous besoin d'un logement si vous entrez en formation?",
+                        "L'organisme de formation met-il à disposition des logements pendant la formation ?",
+                        "Est-ce que vous avez identifié des solutions d'hébergement temporaires pour suivre une formation?",
+                        "Est-ce que vous avez envisagé de déménager pour un nouvel emploi (En lien avec la formation) ?",
+                        "Est-ce que vous avez identifié des solutions d'hébergement temporaires pour reprendre un emploi?",
+                        "Impôt sur le revenu / déduction des frais de double résidence?"
+                    ], tools: [{ label: "Action Logement", url: "https://www.actionlogement.fr/" }, { label: "CAF", url: "https://www.caf.fr/" }, { label: "Aide Mobilité", url: "https://www.francetravail.fr/" }, { label: "Alloc Jeunes", url: "https://www.francetravail.fr/" }, { label: "Aide Millau", url: "https://www.cc-millaugrandscausses.fr/" }] }
+                ]
+            },
+            bagage: {
+                id: 'bagage', pillar: "1. MON DIAGNOSTIC", title: "Mon Bagage (CV)", icon: "fa-solid fa-suitcase", color: "text-indigo-600", bg: "bg-indigo-50", border: "border-indigo-200",
+                description: "Compétences, expériences et historique.",
+                subsections: [
+                    { title: "Compétences", icon: "fa-solid fa-file-lines", questions: [
+                        "Quel est le parcours de la personne ? CV, professionnel, extra professionnel,",
+                        "Questionner les centres d'intérêts",
+                        "La personne est-elle au clair de ses compétences, connaissances ? sait-elle les nommer?",
+                        "Avez-vous testé vos compétences numériques? (PIX EMPLOI)",
+                        "Quel est le parcours « Pôle Emploi » quelles presta ? formations ? Re-situer dans le temps ces actions,",
+                        "Satisfaction suite à ces actions."
+                    ], 
+                      tools: [
+                          { label: "VOTRE OUTIL ANALYSE COMPÉTENCES", url: "#", isSpecial: true, specialId: 'skills_analysis' },
+                          { label: "Mon profil compétences", url: "https://candidat.francetravail.fr/compte/profil/competences" },
+                          { label: "Atelier Faire le point", url: "https://www.francetravail.fr/" },
+                          { label: "Passeport orientation", url: "https://passeport.orientation-formation.fr/" },
+                          { label: "Activ'Projet", url: "https://www.francetravail.fr/" }
+                      ] 
+                    }
+                ]
+            },
+            exploration: {
+                id: 'exploration', pillar: "2. MON CAP", title: "Exploration", icon: "fa-solid fa-compass", color: "text-cyan-600", bg: "bg-cyan-50", border: "border-cyan-200",
+                description: "Identifier pistes et exclusions.",
+                subsections: [
+                    { title: "Ce que je ne veux pas", icon: "fa-solid fa-ban", questions: [
+                        "Est-ce que vous ne souhaitez plus exercer certains métiers ou activités?",
+                        "Est-ce que vous ne pouvez plus exercer certains métiers ou activités?",
+                        "Avez-vous des contraintes ? A court terme / long terme ? Horaires ? Santé ? Mobilité ?"
+                    ], tools: [{ label: "Atelier Point", url: "https://www.francetravail.fr/" }, { label: "Activ'projet", url: "https://www.francetravail.fr/" }, { label: "Projet Pro", url: "https://labonneformation.francetravail.fr/" }, { label: "Psy du travail", url: "https://www.francetravail.fr/" }, { label: "Bilan compétences", url: "https://www.moncompteformation.gouv.fr/" }, { label: "Atelier Construire", url: "https://www.francetravail.fr/" }, { label: "MOOC Projet", url: "https://www.emploi-store.fr/" }, { label: "MOOC Focus", url: "https://www.emploi-store.fr/" }, { label: "Onisep", url: "https://www.onisep.fr/" }, { label: "Explorama", url: "https://www.emploi-store.fr/" }, { label: "Quest. Préférences", url: "#" }, { label: "Quest. Valeurs", url: "#" }, { label: "Cartes métiers", url: "#" }, { label: "IPPE", url: "#" }, { label: "Grilles hiérarch.", url: "#" }, { label: "Grilles auto-pos.", url: "#" }, { label: "Enquêtes", url: "#" }, { label: "Immersion", url: "https://immersion-facile.beta.gouv.fr/" }, { label: "Vidéos FT", url: "https://www.youtube.com/user/poleemploi" }] },
+                    { title: "Important pour moi", icon: "fa-solid fa-heart", questions: [
+                        "Quelles activités que vous avez exercées appréciez-vous au niveau professionnel? Extra-professionnel? Questionner les centres d'intérêts",
+                        "Savez-vous explicitez vos compétences ?",
+                        "Quel serait votre environnement professionnel idéal ? (extérieur, intérieur, collègues, public, bureau, relations interpersonnelles, froid/chaud, debout/assis, les habiletés, ...?)",
+                        "Quelles seraient les conditions de travail idéales? (horaires, travail le week-end, relations hiérarchiques, avantages sociaux,...?)"
+                    ], tools: [{label: "Idem section précédente", url: "#"}] }
+                ]
+            },
+            validation: {
+                id: 'validation', pillar: "2. MON CAP", title: "Validation idée", icon: "fa-regular fa-lightbulb", color: "text-cyan-600", bg: "bg-cyan-50", border: "border-cyan-200",
+                description: "Vérifier faisabilité.",
+                subsections: [
+                    { title: "Analyse Métier", icon: "fa-solid fa-magnifying-glass", questions: [
+                        "Comment cette idée vous est-elle venue?",
+                        "Quelle est votre connaissance de ce métier ?",
+                        "Est-il nécessaire de passer par une formation pour accéder à ce métier ?",
+                        "Avez-vous une expérience professionnelle ou extra-professionnelle liée à ce métier ?",
+                        "Quels sont les avantages et les inconvénients de ce métier?",
+                        "Les conditions d'exercice de ce métier vous conviennent-elles ?",
+                        "Qu'est-ce qui vous plait le + / le - dans ce métier ?",
+                        "Quelles sont les qualités requises ? Et celles que vous disposez ? en vue d'exercer ce métier.",
+                        "Quelles sont les valeurs importantes dans ce métier ? Ce qui est important/ce qui parait important pour la personne?",
+                        "Est-ce que ce métier fait sens dans le parcours ? Sentiment d'utilité envers la société ? Pourquoi la personne a envie de faire ce métier ?",
+                        "Connaissez-vous les conditions d'accès à ce métier?",
+                        "Connaissez-vous des personnes qui exercent ce métier ?",
+                        "Est-ce qu'il y a des raisons pour lesquelles ce projet peut aboutir? ne peut pas aboutir?"
+                    ], tools: [{ label: "Fiches Rome", url: "https://candidat.francetravail.fr/metierscope/" }, { label: "Immersion", url: "https://immersion-facile.beta.gouv.fr/" }, { label: "Enquêtes", url: "#" }, { label: "Vidéos", url: "https://oniseptv.onisep.fr/" }] }
+                ]
+            },
+            adequation: {
+                id: 'adequation', pillar: "2. MON CAP", title: "Marché & Territoire", icon: "fa-solid fa-map-location-dot", color: "text-teal-600", bg: "bg-teal-50", border: "border-teal-200",
+                description: "Opportunités locales.",
+                subsections: [
+                    { title: "Opportunités", icon: "fa-solid fa-shop", questions: [
+                        "Y'a-t-il des offres sur le métier ciblé votre secteur géographique de recherche ?",
+                        "Avez-vous évalué le nombre potentiel de candidats sur le secteur ?",
+                        "Avez-vous recherché de l'information sur ce métier sur ce territoire ?",
+                        "Connaissez-vous les opportunités d'embauche sur ce territoire ?",
+                        "Connaissez-vous les Secteurs / Métiers en tension du territoire ?",
+                        "Connaissez-vous les employeurs qui peuvent recruter dans ce domaine ?",
+                        "Connaissez-vous des professionnels qui exercent ce métier ? En avez-vous rencontré, dans quel cadre ?"
+                    ], tools: [{ label: "Atelier Construire", url: "https://www.francetravail.fr/" }, { label: "Observatoire", url: "https://www.observatoire-emploi-occitanie.fr/" }, { label: "Météo Emploi", url: "https://meteo-emploi.francetravail.fr/" }, { label: "Echanges CDE", url: "#" }, { label: "Echanges Intérim", url: "#" }, { label: "ZOOM Z08", url: "#" }, { label: "ALEXANDRIE", url: "#" }, { label: "Mes événements", url: "https://mesevenementsemploi.francetravail.fr/" }, { label: "DARES", url: "https://dares.travail-emploi.gouv.fr/" }, { label: "Enquête", url: "#" }, { label: "Immersion", url: "https://immersion-facile.beta.gouv.fr/" }] }
+                ]
+            },
+            formation: {
+                id: 'formation', pillar: "3. MA STRATÉGIE", title: "Formation", icon: "fa-solid fa-graduation-cap", color: "text-red-600", bg: "bg-red-50", border: "border-red-200",
+                description: "Choix et financement.",
+                subsections: [
+                    { title: "Choix", icon: "fa-solid fa-signs-post", questions: [
+                        "La formation est-elle nécessaire pour les employeurs du métier visé et si oui quelle formation ?",
+                        "Pourquoi avez-vous choisi cette formation?",
+                        "Avez-vous les prérequis pour intégrer et suivre cette formation?",
+                        "Avez-vous comparé plusieurs plans de formation ? Au niveau contenu ? Au niveau coût?",
+                        "Dans le cas d'une formation à distance, êtes-vous équipé pour suivre cette formation? avez-vous passé le test PIX pour mesurer votre autonomie numérique ?",
+                        "Avez-vous consulté le taux de retour à l'emploi à l'issue de cette formation?",
+                        "Avez-vous connaissance du taux de réussite à l'examen suite à cette formation?"
+                    ], tools: [{ label: "La Bonne Formation", url: "https://labonneformation.francetravail.fr/" }, { label: "Mon CPF", url: "https://www.moncompteformation.gouv.fr/" }, { label: "Immersion", url: "https://immersion-facile.beta.gouv.fr/" }, { label: "Enquêtes", url: "#" }, { label: "Offres", url: "https://candidat.francetravail.fr/offres/emploi" }, { label: "App Ma Formation", url: "https://www.emploi-store.fr/" }, { label: "Me former région", url: "https://www.meformerenregion.fr/" }, { label: "La Bonne Alternance", url: "https://labonnealternance.apprentissage.beta.gouv.fr/" }, { label: "Prépa compétences", url: "https://www.francetravail.fr/" }, { label: "Projet Pro", url: "https://www.francetravail.fr/" }] },
+                    { 
+                        title: "Financement", icon: "fa-solid fa-wallet", questions: [
+                            "Avez-vous connaissance des dispositifs de financement de formation ?",
+                            "Savez-vous comment financer votre projet de formation?",
+                            "Avez-vous consulté votre compte CPF?",
+                            "Avez-vous la possibilité de vous autofinancer cette formation ?"
+                        ], 
+                        tools: [{ label: "Formation Mode Emploi", url: "https://www.francetravail.fr/" }, { label: "VAE", url: "https://vae.gouv.fr/" }, { label: "DORA", url: "https://dora.inclusion.beta.gouv.fr/" }, { label: "Schéma", url: "#" }],
+                        customContent: (
+                            <div className="mt-6 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                                <h5 className="font-bold text-slate-800 mb-6 text-sm flex items-center justify-center uppercase tracking-wider">
+                                    <span className="bg-red-100 text-ft-red p-1.5 rounded-lg mr-2"><i className="fa-solid fa-layer-group"></i></span>
+                                    Priorités de Financement
+                                </h5>
+                                <div className="flex flex-col items-center gap-2">
+                                    <div className="w-full max-w-md bg-emerald-500 text-white p-3 rounded-xl shadow-lg text-center font-bold text-sm">1. CPF (Compte Personnel)</div>
+                                    <div className="w-[90%] max-w-md bg-blue-500 text-white p-3 rounded-xl shadow-lg text-center font-bold text-sm">2. ALTERNANCE</div>
+                                    <div className="w-[80%] max-w-md bg-indigo-500 text-white p-3 rounded-xl shadow-lg text-center font-bold text-sm">3. POE / AFPR</div>
+                                    <div className="w-[70%] max-w-md bg-violet-500 text-white p-3 rounded-xl shadow-lg text-center font-bold text-sm">4. RÉGION</div>
+                                    <div className="w-[60%] max-w-md bg-ft-red text-white p-3 rounded-xl shadow-lg text-center font-bold text-sm border-2 border-white/20">5. AIF (France Travail)</div>
+                                    <div className="w-[50%] max-w-md bg-slate-400 text-white p-3 rounded-xl text-center font-bold text-xs">6. AUTO</div>
+                                </div>
+                            </div>
+                        )
+                    },
+                    { 
+                        title: "Ressources Fi", icon: "fa-solid fa-hand-holding-dollar", questions: [
+                            "Connaissez-vous votre rémunération durant cette formation, et après celle-ci ?",
+                            "Avez-vous estimé les coûts de déplacement et d'hébergement ?"
+                        ], tools: [{ label: "Simulateur", url: "https://candidat.francetravail.fr/portail-simulateur/" }, { label: "Guide BUDI", url: "#" }, { label: "Tableau BUDI", url: "#" }, { label: "Aide Mobilité", url: "https://www.francetravail.fr/" }, { label: "Tableau prévisionnel", url: "#" }],
+                        customContent: (
+                            <div className="mt-4 p-5 bg-white rounded-2xl border border-slate-100 shadow-sm">
+                                <h5 className="font-bold text-slate-700 mb-4 text-sm flex items-center gap-2"><i className="fa-solid fa-calculator text-blue-500"></i> Budget Prévisionnel</h5>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-red-50 p-4 rounded-xl border border-red-100"><h6 className="text-red-800 font-bold text-xs uppercase mb-2">Dépenses (Besoins)</h6><ul className="text-xs text-red-700 space-y-1"><li>Frais Pédago</li><li>Transport/Repas</li><li>Vie Quotidienne</li></ul></div>
+                                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100"><h6 className="text-emerald-800 font-bold text-xs uppercase mb-2">Ressources (Financement)</h6><ul className="text-xs text-emerald-700 space-y-1"><li>CPF / AIF</li><li>Aide Mobilité</li><li>AREF / RFPE</li></ul></div>
+                                </div>
+                                <div className="mt-3 bg-slate-800 text-white p-3 rounded-lg text-center font-bold text-sm">
+                                    Reste à charge = 0 €
+                                </div>
+                            </div>
+                        )
+                    }
+                ]
+            },
+            emploi: {
+                id: 'emploi', pillar: "3. MA STRATÉGIE", title: "Emploi", icon: "fa-solid fa-briefcase", color: "text-orange-600", bg: "bg-orange-50", border: "border-orange-200",
+                description: "Recherche directe.",
+                subsections: [
+                    { title: "Offres", icon: "fa-solid fa-bullhorn", questions: [
+                        "Consultez-vous les offres d'emploi sur ce métier ?",
+                        "Par quels moyens ? Sites ? Applications? À quelle fréquence ?",
+                        "Etes-vous abonné à des offres d'emploi ? Sur quels sites ?",
+                        "Votre CV est-il mis à jour ? Et déposé sur votre espace FT?",
+                        "Comment faites-vous vos candidatures / réponses aux offres ?",
+                        "Vous-êtes-vous renseigné sur ce métier ?",
+                        "Par quels moyens ? Sites?",
+                        "Est-il nécessaire de passer par une formation pour accéder à ce métier, connaissez-vous les mesures d'adaptation au poste de travail ?",
+                        "Acceptez-vous la promotion de profil ?"
+                    ], tools: [{ label: "Espace perso", url: "https://candidat.francetravail.fr/espaceperso/" }, { label: "Emploi Store", url: "https://www.emploi-store.fr/" }, { label: "Métierscope", url: "https://candidat.francetravail.fr/metierscope/" }, { label: "DUNE", url: "#" }, { label: "Offre conseiller", url: "#" }, { label: "Recherche FT", url: "https://candidat.francetravail.fr/offres/emploi" }, { label: "Observatoire", url: "https://www.observatoire-emploi-occitanie.fr/" }, { label: "Fiche ONISEP", url: "https://www.onisep.fr/" }, { label: "ZOOM Z.03", url: "#" }, { label: "Portefeuille", url: "#" }, { label: "Enquête", url: "#" }, { label: "Immersion", url: "https://immersion-facile.beta.gouv.fr/" }, { label: "Réseaux pros", url: "#" }, { label: "Orientation Pour Tous", url: "https://www.orientation-pour-tous.fr/" }, { label: "Atelier Organiser", url: "https://www.francetravail.fr/" }, { label: "Atelier CV", url: "https://www.francetravail.fr/" }] }
+                ]
+            }
+        };
+
+        const PILLARS_ORDER = ["1. MON DIAGNOSTIC", "2. MON CAP", "3. MA STRATÉGIE"];
+
+        // --- COMPOSANT ANALYSE CV COMPLET ---
+        const SkillsAnalysis = ({ onBack }) => {
+            const [targetJob, setTargetJob] = useState("");
+            const [pastJobs, setPastJobs] = useState("");
+            const [isLoading, setIsLoading] = useState(false);
+            const [isCvLoading, setIsCvLoading] = useState(false);
+            const [errorMsg, setErrorMsg] = useState("");
+            const [results, setResults] = useState(null);
+            
+            // État pour le contenu supplémentaire (conseils CV/Entretien)
+            const [extraContent, setExtraContent] = useState({ visible: false, loading: false, html: "", title: "", color: "" });
+            
+            // État pour la modale de zoom
+            const [modal, setModal] = useState({ visible: false, loading: false, html: "", title: "", color: "" });
+
+            const cvInputRef = useRef(null);
+
+            // --- GESTION UPLOAD CV ---
+            const handleCvUpload = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                if (file.type !== 'application/pdf') {
+                    alert("Veuillez sélectionner un fichier PDF valide.");
+                    return;
+                }
+
+                setIsCvLoading(true);
+                setErrorMsg("");
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const typedarray = new Uint8Array(arrayBuffer);
+                    const loadingTask = pdfjsLib.getDocument(typedarray);
+                    
+                    const pdf = await loadingTask.promise;
+                    let fullText = "";
+                    let hasText = false;
+
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map(item => item.str).filter(str => str.trim().length > 0).join(' ');
+                        if (pageText.length > 50) hasText = true;
+                        fullText += pageText + "\n\n";
+                    }
+
+                    if (!hasText) throw new Error("PDF vide ou scanné");
+
+                    // Nettoyage via IA
+                    const cleanedText = await cleanCvWithAI(fullText);
+                    
+                    const CV_MARKER = "--- CONTENU CV (Restructuré par IA) ---";
+                    const currentVal = pastJobs.split(CV_MARKER)[0].trim();
+                    setPastJobs((currentVal ? currentVal + "\n\n" : "") + CV_MARKER + "\n\n" + cleanedText);
+
+                } catch (error) {
+                    console.error("Erreur PDF:", error);
+                    alert("Erreur lors de la lecture du PDF. " + (error.message === "PDF vide ou scanné" ? "Le fichier semble être une image." : ""));
+                } finally {
+                    setIsCvLoading(false);
+                    if(cvInputRef.current) cvInputRef.current.value = '';
+                }
+            };
+
+            const cleanCvWithAI = async (rawText) => {
+                const safeRawText = rawText.substring(0, 12000);
+                const prompt = `
+                Tu es un assistant administratif. Voici le texte brut extrait d'un fichier PDF de CV :
+                """${safeRawText}"""
+                TACHE : Réécris ce contenu proprement pour qu'il soit lisible dans un champ texte simple.
+                1. Identifie et liste les expériences professionnelles (Poste, Entreprise, Dates, Missions).
+                2. Identifie les formations principales.
+                3. Supprime le texte inutile (numéros de page, mentions légales).
+                4. Utilise un formatage simple avec des tirets (-).
+                Réponds uniquement avec le texte nettoyé.`;
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    if (!response.ok) throw new Error("Erreur API");
+                    const data = await response.json();
+                    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || rawText;
+                } catch (e) {
+                    console.warn("Fallback raw text", e);
+                    return rawText;
+                }
+            };
+
+            // --- ANALYSE PRINCIPALE ---
+            const startAnalysis = async () => {
+                if(!targetJob || !pastJobs) {
+                    setErrorMsg("⚠️ Veuillez remplir le métier visé ET les expériences passées.");
+                    return;
+                }
+
+                setIsLoading(true);
+                setErrorMsg("");
+                setResults(null);
+                setExtraContent({ ...extraContent, visible: false });
+
+                const SYSTEM_PROMPT = `
+                Tu es un expert en orientation professionnelle chez France Travail. 
+                Ta mission : Analyser le parcours d'un candidat pour identifier ses compétences transférables vers un métier cible et suggérer des pistes de formation.
+                Format de réponse attendu (JSON uniquement) :
+                {
+                    "targetJobTitle": "Titre du métier visé",
+                    "analysisSummary": "Une phrase de synthèse encourageante sur la faisabilité.",
+                    "savoirFaireTechniques": ["Compétence 1", "Compétence 2"],
+                    "savoirEtreTransferables": ["Qualité 1", "Qualité 2"],
+                    "skillsGap": ["Compétence manquante 1", "Compétence manquante 2"],
+                    "besoinsFormation": ["Suggestion de formation ou certification 1", "Suggestion 2"]
+                }
+                Ne mets pas de texte avant ou après le JSON.`;
+
+                try {
+                    const userQuery = `Métier visé: ${targetJob}. Expériences: ${pastJobs.substring(0, 15000)}.`;
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: userQuery }] }],
+                            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+
+                    if (!response.ok) throw new Error(`Erreur serveur (${response.status})`);
+                    const data = await response.json();
+                    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!rawText) throw new Error("Aucune réponse IA");
+                    
+                    setResults(JSON.parse(rawText));
+
+                } catch (err) {
+                    console.error(err);
+                    setErrorMsg("Une erreur est survenue lors de l'analyse.");
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // --- CONSEILS SUPPLEMENTAIRES ---
+            const getAdvice = async (type) => {
+                setExtraContent({ ...extraContent, visible: true, loading: true, html: "" });
+                
+                let prompt = "";
+                let title = "";
+                let color = "";
+
+                if (type === 'cv') {
+                    title = "📌 Propositions d'amélioration pour le CV";
+                    color = "text-indigo-800";
+                    prompt = `Expert RH. Profil : ${pastJobs.substring(0, 5000)}. Poste : ${targetJob}. Donne 3 à 5 recommandations concrètes pour le CV. HTML simple.`;
+                } else {
+                    title = "🎙️ Arguments clés pour l'entretien";
+                    color = "text-teal-800";
+                    prompt = `Coach recrutement. Poste : ${targetJob}. Profil : ${pastJobs.substring(0, 5000)}. 3 à 5 punchlines/arguments pour l'entretien. HTML simple.`;
+                }
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await response.json();
+                    const html = data.candidates?.[0]?.content?.parts?.[0]?.text.replace(/```html/g, '').replace(/```/g, '');
+                    setExtraContent({ visible: true, loading: false, html, title, color });
+                } catch (e) {
+                    setExtraContent({ ...extraContent, loading: false, html: "<p class='text-red-500'>Erreur</p>" });
+                }
+            };
+
+            // --- ZOOM DETAILS ---
+            const openZoom = async (category) => {
+                setModal({ visible: true, loading: true, html: "", title: "", color: "" });
+                
+                let prompt = "";
+                let title = "";
+                let color = "";
+
+                switch(category) {
+                    case 'savoir_faire':
+                        title = "🛠️ Analyse détaillée : Savoir-Faire Techniques"; color = "bg-blue-50";
+                        prompt = `Expert métier pour : ${targetJob}. Expériences : ${pastJobs.substring(0, 5000)}. Détaille les COMPÉTENCES TECHNIQUES (Hard Skills) acquises et à acquérir. HTML simple.`;
+                        break;
+                    case 'savoir_etre':
+                        title = "🤝 Analyse détaillée : Savoir-Être"; color = "bg-green-50";
+                        prompt = `Coach RH. Poste : ${targetJob}. Détaille les SAVOIR-ÊTRE requis avec exemples concrets. HTML simple.`;
+                        break;
+                    case 'gaps':
+                        title = "🚀 Analyse détaillée : Écarts à combler"; color = "bg-orange-50";
+                        prompt = `Conseiller évolution. Poste : ${targetJob}. Expériences : ${pastJobs.substring(0, 5000)}. Analyse les ÉCARTS (Gaps) et leur criticité. HTML simple.`;
+                        break;
+                    case 'formation':
+                        title = "🎓 Analyse détaillée : Plan de Formation"; color = "bg-purple-50";
+                        prompt = `Expert formation France Travail. Poste : ${targetJob}. Suggère des formations précises (Titres Pro, RNCP) et dispositifs. HTML simple.`;
+                        break;
+                }
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await response.json();
+                    const html = data.candidates?.[0]?.content?.parts?.[0]?.text.replace(/```html/g, '').replace(/```/g, '');
+                    setModal({ visible: true, loading: false, html, title, color });
+                } catch (e) {
+                    setModal({ ...modal, loading: false, html: "<p>Erreur</p>" });
+                }
+            };
+
+            const hasCv = pastJobs.includes("CONTENU CV") || pastJobs.length > 50;
+
+            const makeList = (items, colorClass) => {
+                if(!items || items.length === 0) return <p className="text-sm text-gray-500 italic">Non spécifié</p>;
+                return (
+                    <ul className="space-y-2 mt-2">
+                        {items.map((item, i) => (
+                            <li key={i} className="flex items-start">
+                                <span className={`mr-2 mt-1.5 w-2 h-2 rounded-full ${colorClass} flex-shrink-0`}></span>
+                                <span className="text-gray-700">{item}</span>
+                            </li>
+                        ))}
+                    </ul>
+                );
+            };
+
+            return (
+                <div className="bg-slate-50 min-h-full p-4 md:p-8 animate-fade-in pb-20 relative">
+                    <button onClick={onBack} className="text-slate-500 hover:text-ft-blue mb-6 font-medium flex items-center gap-2">
+                        <i className="fa-solid fa-arrow-left"></i> Retour
+                    </button>
+                    
+                    <div className="max-w-5xl mx-auto">
+                        <header className="text-center mb-10">
+                            <div className="inline-block p-3 rounded-full bg-blue-100 mb-4">
+                                <i className="fa-solid fa-wand-magic-sparkles text-2xl text-blue-600"></i>
+                            </div>
+                            <h1 className="text-3xl md:text-4xl font-extrabold text-blue-900 mb-2">Cartographie des Compétences</h1>
+                            <p className="text-lg text-blue-600">Assistant d'analyse & Formation</p>
+                        </header>
+
+                        {/* Formulaire */}
+                        <div className="bg-white p-6 md:p-8 rounded-xl shadow-xl border border-blue-100 mb-8">
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-lg font-semibold text-gray-700 mb-2">1. Métier visé</label>
+                                    <textarea value={targetJob} onChange={(e) => setTargetJob(e.target.value)} placeholder="Ex: Assistant Administratif, Plombier..." className="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 resize-none" rows="1"></textarea>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between items-end mb-2">
+                                        <label className="block text-lg font-semibold text-gray-700">2. Expériences passées</label>
+                                        <input type="file" ref={cvInputRef} accept=".pdf" className="hidden" onChange={handleCvUpload} />
+                                        <button onClick={() => cvInputRef.current.click()} className="text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1.5 rounded-md border border-blue-200 transition flex items-center gap-2 font-medium">
+                                            <i className="fa-solid fa-file-pdf"></i> Importer un CV (PDF)
+                                        </button>
+                                    </div>
+                                    {isCvLoading && (
+                                        <div className="text-sm text-blue-600 mb-2 flex items-center bg-blue-50 p-2 rounded">
+                                            <i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Analyse du fichier en cours...
+                                        </div>
+                                    )}
+                                    <textarea value={pastJobs} onChange={(e) => setPastJobs(e.target.value)} placeholder="Saisissez vos expériences ou importez votre CV..." className="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 resize-none h-48"></textarea>
+                                </div>
+                                <div className="text-center pt-2">
+                                    <button onClick={startAnalysis} disabled={isLoading} className="w-full md:w-2/3 py-4 bg-blue-600 text-white font-bold text-lg rounded-lg shadow-lg hover:bg-blue-700 transition transform hover:-translate-y-0.5 disabled:opacity-50 flex justify-center items-center mx-auto">
+                                        {isLoading ? <><i className="fa-solid fa-circle-notch fa-spin mr-2"></i> Analyse en cours...</> : "Lancer l'Analyse des Compétences"}
+                                    </button>
+                                    {errorMsg && <p className="mt-4 text-red-600 font-medium bg-red-50 p-3 rounded-lg border border-red-200">{errorMsg}</p>}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Résultats */}
+                        {results && (
+                            <div className="animate-fade-in space-y-8">
+                                <div className="bg-white rounded-xl shadow-lg border border-blue-100 overflow-hidden">
+                                    <div className="bg-blue-600 p-4 text-white text-center">
+                                        <h2 className="text-xl font-bold">Résultat pour : {results.targetJobTitle}</h2>
+                                        <p className="text-blue-100 text-sm mt-1 opacity-90">{results.analysisSummary}</p>
+                                        <p className="text-xs text-blue-200 mt-2 italic">👇 Cliquez sur les cadres ci-dessous pour voir plus de détails 👇</p>
+                                    </div>
+                                    <div className="p-6 grid gap-6 md:grid-cols-2">
+                                        <div onClick={() => openZoom('savoir_faire')} className="group cursor-pointer bg-blue-50 p-4 rounded-lg border border-blue-100 hover:shadow-lg transition relative">
+                                            <h3 className="font-bold text-blue-800 flex items-center mb-3">🛠️ Savoir-Faire (Hard Skills)</h3>
+                                            {makeList(results.savoirFaireTechniques, 'bg-blue-500')}
+                                            <p className="text-xs text-blue-400 mt-3 text-center opacity-0 group-hover:opacity-100 transition">Cliquez pour le détail technique</p>
+                                        </div>
+                                        <div onClick={() => openZoom('savoir_etre')} className="group cursor-pointer bg-green-50 p-4 rounded-lg border border-green-100 hover:shadow-lg transition relative">
+                                            <h3 className="font-bold text-green-800 flex items-center mb-3">🤝 Savoir-Être (Soft Skills)</h3>
+                                            {makeList(results.savoirEtreTransferables, 'bg-green-500')}
+                                            <p className="text-xs text-green-500 mt-3 text-center opacity-0 group-hover:opacity-100 transition">Cliquez pour voir des exemples</p>
+                                        </div>
+                                        <div onClick={() => openZoom('gaps')} className="group cursor-pointer bg-orange-50 p-4 rounded-lg border border-orange-100 hover:shadow-lg transition relative">
+                                            <h3 className="font-bold text-orange-800 flex items-center mb-3">🚀 À Développer (Gaps)</h3>
+                                            {makeList(results.skillsGap, 'bg-orange-500')}
+                                            <p className="text-xs text-orange-500 mt-3 text-center opacity-0 group-hover:opacity-100 transition">Cliquez pour analyser les écarts</p>
+                                        </div>
+                                        <div onClick={() => openZoom('formation')} className="group cursor-pointer bg-purple-50 p-4 rounded-lg border border-purple-100 hover:shadow-lg transition relative">
+                                            <h3 className="font-bold text-purple-800 flex items-center mb-3">🎓 Besoins de Formation</h3>
+                                            {makeList(results.besoinsFormation, 'bg-purple-500')}
+                                            <p className="text-xs text-purple-500 mt-3 text-center opacity-0 group-hover:opacity-100 transition">Cliquez pour voir les titres RNCP</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Pour aller plus loin */}
+                                <div className="max-w-5xl mx-auto">
+                                    <h3 className="text-2xl font-bold text-gray-800 mb-6 flex items-center"><span className="bg-indigo-600 w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3">3</span> Pour aller plus loin</h3>
+                                    <div className="grid md:grid-cols-2 gap-6">
+                                        <div className="bg-white p-6 rounded-xl shadow-md border border-indigo-100 flex flex-col">
+                                            <h4 className="font-bold text-lg text-indigo-900 mb-2">Optimisation du CV</h4>
+                                            <p className="text-gray-600 text-sm mb-4 flex-grow">Obtenez des suggestions concrètes pour adapter le CV actuel au poste visé.</p>
+                                            <button onClick={() => getAdvice('cv')} disabled={!hasCv} className="w-full py-3 bg-indigo-50 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-100 transition disabled:opacity-50">
+                                                Améliorer mon CV {hasCv && <span className="ml-2 text-green-600 text-xs">✔ CV détecté</span>}
+                                            </button>
+                                        </div>
+                                        <div className="bg-white p-6 rounded-xl shadow-md border border-teal-100 flex flex-col">
+                                            <h4 className="font-bold text-lg text-teal-900 mb-2">Préparation à l'entretien</h4>
+                                            <p className="text-gray-600 text-sm mb-4 flex-grow">Générez les arguments clés pour convaincre le recruteur.</p>
+                                            <button onClick={() => getAdvice('interview')} className="w-full py-3 bg-teal-50 text-teal-600 font-semibold rounded-lg hover:bg-teal-100 transition">Générer mes Arguments</button>
+                                        </div>
+                                    </div>
+
+                                    {/* Contenu Extra */}
+                                    {extraContent.visible && (
+                                        <div className="mt-6 bg-white p-6 rounded-xl shadow-lg border-2 border-dashed border-gray-300 animate-fade-in">
+                                            {extraContent.loading ? (
+                                                <div className="flex justify-center py-4"><i className="fa-solid fa-circle-notch fa-spin text-2xl text-indigo-600"></i></div>
+                                            ) : (
+                                                <div>
+                                                    <h4 className={`text-xl font-bold ${extraContent.color} mb-4 border-b pb-2`}>{extraContent.title}</h4>
+                                                    <div className="space-y-4 text-gray-700 leading-relaxed prose max-w-none" dangerouslySetInnerHTML={{__html: extraContent.html}}></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* MODALE ZOOM */}
+                    {modal.visible && (
+                        <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setModal({ ...modal, visible: false })}></div>
+                                <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                                <div className="relative inline-block align-bottom bg-white rounded-xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full modal-enter">
+                                    <div className={`px-6 py-4 border-b border-gray-200 flex justify-between items-center ${modal.color}`}>
+                                        <h3 className="text-xl font-bold text-gray-900">{modal.title}</h3>
+                                        <button onClick={() => setModal({ ...modal, visible: false })} className="text-gray-400 hover:text-gray-500 focus:outline-none"><i className="fa-solid fa-xmark text-xl"></i></button>
+                                    </div>
+                                    <div className="px-6 py-6 max-h-[70vh] overflow-y-auto">
+                                        {modal.loading ? (
+                                            <div className="flex flex-col items-center justify-center py-10">
+                                                <i className="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-4"></i>
+                                                <p className="text-gray-500">Génération des détails approfondis en cours...</p>
+                                            </div>
+                                        ) : (
+                                            <div className="prose max-w-none text-gray-700" dangerouslySetInnerHTML={{__html: modal.html}}></div>
+                                        )}
+                                    </div>
+                                    <div className="bg-gray-50 px-6 py-3 sm:flex sm:flex-row-reverse">
+                                        <button onClick={() => setModal({ ...modal, visible: false })} className="w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Fermer</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- APP MAIN ---
+        const App = () => {
+            const [activeSection, setActiveSection] = useState(null);
+            const [currentView, setCurrentView] = useState('main'); 
+            const [hoveredSection, setHoveredSection] = useState(null);
+            const [showNotes, setShowNotes] = useState(false);
+            const [selectedTools, setSelectedTools] = useState([]);
+            const [activeTab, setActiveTab] = useState('notes');
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+            const [customTools, setCustomTools] = useState(JSON.parse(localStorage.getItem('custom_tools') || '{}'));
+            const [addingMode, setAddingMode] = useState(null);
+            const [newToolData, setNewToolData] = useState({ label: '', url: '' });
+
+            const activeData = activeSection ? DATA[activeSection] : null;
+
+            // Group data
+            const groupedData = useMemo(() => {
+                const groups = {}; PILLARS_ORDER.forEach(p => groups[p] = []);
+                Object.values(DATA).forEach(item => { if (groups[item.pillar]) groups[item.pillar].push(item); });
+                return groups;
+            }, []);
+
+            // Handlers
+            const handleNavigation = (id, subIdx=0) => {
+                setCurrentView('main'); setActiveSection(id); setMobileMenuOpen(false);
+                setTimeout(() => document.getElementById(`sub-${subIdx}`)?.scrollIntoView({ behavior: 'smooth' }), 100);
+            };
+
+            const toggleTool = (tool) => {
+                setSelectedTools(prev => prev.some(t => t.label === tool.label) ? prev.filter(t => t.label !== tool.label) : [...prev, tool]);
+                if(!showNotes) setShowNotes(true); setActiveTab('plan');
+            };
+
+            const addCustomTool = () => {
+                if(!newToolData.label || !newToolData.url) return;
+                const key = `${activeSection}-${addingMode.index}`;
+                const newTools = { ...customTools, [key]: [...(customTools[key]||[]), { label: newToolData.label, url: newToolData.url, isCustom: true }] };
+                setCustomTools(newTools); localStorage.setItem('custom_tools', JSON.stringify(newTools));
+                setAddingMode(null); setNewToolData({label:'', url:''});
+            };
+
+            const deleteCustomTool = (key, idx) => {
+                const newTools = { ...customTools, [key]: customTools[key].filter((_,i) => i !== idx) };
+                setCustomTools(newTools); localStorage.setItem('custom_tools', JSON.stringify(newTools));
+            };
+
+            const copyPlan = () => {
+                const text = selectedTools.map(t => `- ${t.label} (${t.url})`).join('\n');
+                navigator.clipboard.writeText(text);
+                alert("Plan copié !");
+            };
+
+            const saveCustomTool = () => {
+                 if(!newToolData.label || !newToolData.url) return;
+                 const key = `${activeSection}-${addingMode.idx}`;
+                 const existing = customTools[key] || [];
+                 const newTools = { ...customTools, [key]: [...existing, { label: newToolData.label, url: newToolData.url, isCustom: true }] };
+                 setCustomTools(newTools); localStorage.setItem('custom_tools', JSON.stringify(newTools));
+                 setAddingMode(null); setNewToolData({label:'', url:''});
+            }
+
+            // Renders
+            if (currentView === 'skills_tool') return <SkillsAnalysis onBack={() => setCurrentView('main')} />;
+
+            return (
+                <div className="h-screen flex flex-col">
+                    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-30 shadow-sm">
+                        <div className="flex items-center gap-4">
+                            <button className="lg:hidden text-slate-600" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}><i className="fa-solid fa-bars text-xl"></i></button>
+                            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveSection(null)}>
+                                <div className="w-9 h-9 bg-ft-blue rounded-lg flex items-center justify-center text-white font-bold shadow-sm">FT</div>
+                                <div><h1 className="font-bold text-lg text-slate-800 leading-none">Conseiller Emploi</h1><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Diagnostic</p></div>
+                            </div>
+                        </div>
+                        <button onClick={() => setShowNotes(!showNotes)} className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-sm font-bold ${showNotes ? 'bg-ft-blue text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                            <i className="fa-regular fa-file-lines"></i> Mon Plan {selectedTools.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{selectedTools.length}</span>}
+                        </button>
+                    </header>
+
+                    <div className="flex-1 flex overflow-hidden relative">
+                        {/* Sidebar */}
+                        <aside className={`w-72 bg-[#1d2d5b] text-slate-300 flex flex-col overflow-y-auto absolute lg:relative z-20 h-full transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+                            <div className="p-6 space-y-8">
+                                <button onClick={() => { setActiveSection(null); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-all ${activeSection === null ? "bg-white/10 text-white font-bold" : "hover:bg-white/5 hover:text-white"}`}><i className="fa-solid fa-house"></i><span className="text-sm">Tableau de Bord</span></button>
+                                {PILLARS_ORDER.map(pillar => (
+                                    <div key={pillar}>
+                                        <h4 className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-700 pb-2">{pillar.replace(/[0-9]. /, '')}</h4>
+                                        <div className="space-y-1">
+                                            {groupedData[pillar].map(section => {
+                                                const isActive = activeSection === section.id;
+                                                const isHovered = hoveredSection === section.id;
+                                                return (
+                                                    <div key={section.id} className="relative group" onMouseEnter={() => setHoveredSection(section.id)} onMouseLeave={() => setHoveredSection(null)}>
+                                                        <button onClick={() => handleNavigation(section.id)} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-all ${isActive ? "bg-ft-blue text-white font-semibold shadow-lg" : "hover:bg-slate-800"}`}>
+                                                            <i className={`${section.icon} w-5 text-center`}></i> <span className="text-sm truncate">{section.title}</span> {isActive && <i className="fa-solid fa-chevron-right ml-auto text-xs"></i>}
+                                                        </button>
+                                                        <div className={`overflow-hidden transition-all duration-300 ${isActive || isHovered ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+                                                            <ul className="pl-12 pr-2 space-y-1">
+                                                                {section.subsections.map((sub, idx) => (
+                                                                    <li key={idx}><button onClick={(e) => { e.stopPropagation(); handleNavigation(section.id, idx); }} className="w-full text-left text-xs text-slate-400 py-1.5 hover:text-white block transition-colors">• {sub.title}</button></li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </aside>
+                        {mobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-10 lg:hidden" onClick={() => setMobileMenuOpen(false)}></div>}
+
+                        {/* Main Content */}
+                        <main className="flex-1 overflow-y-auto bg-slate-50 p-6 lg:p-10 scroll-smooth">
+                            {activeSection === null ? (
+                                <div className="animate-fade-in max-w-6xl mx-auto">
+                                    <h2 className="text-3xl font-bold text-slate-800 mb-8 text-center">Tableau de Bord</h2>
+                                    <div className="space-y-10">
+                                        {PILLARS_ORDER.map(pillar => (
+                                            <div key={pillar}>
+                                                <div className="flex items-center gap-4 mb-4"><div className="h-px bg-slate-200 flex-1"></div><h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{pillar}</h3><div className="h-px bg-slate-200 flex-1"></div></div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                    {groupedData[pillar].map(section => (
+                                                        <button key={section.id} onClick={() => handleNavigation(section.id)} className="text-left bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all group">
+                                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${section.bg} ${section.color}`}><i className={`${section.icon} text-xl`}></i></div>
+                                                            <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-ft-blue transition-colors">{section.title}</h3>
+                                                            <p className="text-sm text-slate-500">{section.description}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="animate-fade-in max-w-6xl mx-auto pb-20">
+                                    <button 
+                                        onClick={() => setActiveSection(null)} 
+                                        className="mb-6 flex items-center gap-2 text-slate-500 hover:text-ft-blue transition-colors font-medium text-sm bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-100 w-fit"
+                                    >
+                                        <i className="fa-solid fa-arrow-left"></i> Retour au Tableau de Bord
+                                    </button>
+                                    
+                                    <div className={`mb-8 p-6 rounded-2xl flex items-center gap-6 shadow-sm border border-slate-100 bg-white`}>
+                                        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-3xl ${activeData.bg} ${activeData.color}`}><i className={activeData.icon}></i></div>
+                                        <div><div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">{activeData.pillar}</div><h2 className="text-3xl font-bold text-slate-800">{activeData.title}</h2></div>
+                                    </div>
+                                    <div className="space-y-8">
+                                        {activeData.subsections.map((sub, idx) => (
+                                            <div key={idx} id={`sub-${idx}`} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden scroll-mt-24">
+                                                <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex items-center gap-3"><i className={`${sub.icon} text-ft-blue`}></i><h3 className="font-bold text-lg text-slate-800">{sub.title}</h3></div>
+                                                <div className="p-8 grid lg:grid-cols-12 gap-8 items-start">
+                                                    <div className="lg:col-span-7">
+                                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Questions & Points Clés</h4>
+                                                        <ul className="space-y-3">
+                                                            {sub.questions.map((q, i) => (
+                                                                <li key={i} className="flex gap-3 text-slate-600 text-sm group"><span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${activeData.color.replace('text-', 'bg-').replace('600', '400')}`}></span><span>{q}</span></li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                    <div className="lg:col-span-5 lg:border-l border-slate-100 lg:pl-8">
+                                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Outils & Ressources</h4>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                            {sub.tools.map((t, i) => {
+                                                                const isSelected = selectedTools.some(x => x.label === t.label);
+                                                                const isSpecial = t.isSpecial;
+                                                                const hasLink = t.url && t.url !== '#' && t.url !== '';
+                                                                
+                                                                return (
+                                                                    <div key={i} className={`flex items-center p-3 rounded-lg border transition-all ${isSelected ? 'bg-blue-50 border-ft-blue' : (hasLink ? 'bg-white border-slate-200 tool-link' : 'bg-slate-50 border-slate-100 tool-static')}`}>
+                                                                        <button onClick={() => toggleTool(t)} className="text-slate-400 hover:text-ft-blue p-1 mr-2"><i className={`fa-solid ${isSelected ? 'fa-check text-ft-blue' : 'fa-plus'}`}></i></button>
+                                                                        
+                                                                        {/* Tool Content */}
+                                                                        <div 
+                                                                            onClick={() => {
+                                                                                if(isSpecial) setCurrentView('skills_tool');
+                                                                                else if(hasLink) window.open(t.url, '_blank');
+                                                                            }} 
+                                                                            className={`flex-1 flex items-center justify-between text-xs font-semibold ${hasLink || isSpecial ? 'cursor-pointer' : 'cursor-default text-slate-500'}`}
+                                                                        >
+                                                                            <span className={`flex items-center gap-2 ${isSpecial ? 'text-indigo-600' : (hasLink ? 'text-ft-blue' : 'text-slate-500')}`}>
+                                                                                {isSpecial && <i className="fa-solid fa-wand-magic-sparkles"></i>}
+                                                                                {t.label}
+                                                                            </span>
+                                                                            {hasLink && !isSpecial && <i className="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400"></i>}
+                                                                            {!hasLink && !isSpecial && <i className="fa-solid fa-lock text-[10px] text-slate-300"></i>}
+                                                                        </div>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                            
+                                                            {(customTools[`${activeSection}-${idx}`] || []).map((t, cIdx) => (
+                                                                <div key={`c-${cIdx}`} className="flex items-center p-2 rounded-lg border border-dashed border-slate-300 bg-slate-50">
+                                                                    <button onClick={() => { 
+                                                                        const newT = {...customTools}; newT[`${activeSection}-${idx}`].splice(cIdx,1); 
+                                                                        setCustomTools(newT); localStorage.setItem('custom_tools', JSON.stringify(newT));
+                                                                    }} className="text-slate-300 hover:text-red-500 mr-2"><i className="fa-solid fa-trash text-xs"></i></button>
+                                                                    <a href={t.url} target="_blank" className="flex-1 truncate text-xs text-slate-500 hover:text-ft-blue hover:underline">{t.label}</a>
+                                                                </div>
+                                                            ))}
+                                                            
+                                                            {addingMode && addingMode.id === activeSection && addingMode.idx === idx ? (
+                                                                <div className="p-2 bg-slate-50 border border-blue-200 rounded-lg animate-fade-in">
+                                                                    <input autoFocus className="w-full mb-1 p-1 text-xs border rounded" placeholder="Nom" value={newToolData.label} onChange={e=>setNewToolData({...newToolData, label:e.target.value})} />
+                                                                    <input className="w-full mb-2 p-1 text-xs border rounded" placeholder="URL" value={newToolData.url} onChange={e=>setNewToolData({...newToolData, url:e.target.value})} />
+                                                                    <div className="flex justify-end gap-2">
+                                                                        <button onClick={() => setAddingMode(null)} className="text-xs text-slate-400">Annuler</button>
+                                                                        <button onClick={saveCustomTool} className="text-xs bg-ft-blue text-white px-2 py-1 rounded">OK</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <button onClick={() => { setAddingMode({ id: activeSection, idx }); setNewToolData({label:'', url:''}); }} className="mt-2 py-1.5 border border-dashed border-slate-300 rounded-lg text-xs text-slate-400 hover:text-ft-blue hover:bg-slate-50 transition w-full">+ Lien perso</button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {sub.customContent && <div className="px-8 pb-8">{sub.customContent}</div>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="h-20"></div>
+                                </div>
+                            )}
+                        </main>
+
+                        {showNotes && (
+                            <aside className="w-80 bg-white border-l border-slate-200 flex flex-col shadow-2xl z-20 animate-fade-in absolute right-0 top-0 h-full">
+                                <div className="flex border-b border-slate-200 bg-slate-50">
+                                    <button onClick={() => setActiveTab('notes')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'notes' ? 'border-ft-blue text-ft-blue' : 'border-transparent text-slate-500'}`}>Notes</button>
+                                    <button onClick={() => setActiveTab('plan')} className={`flex-1 py-3 text-sm font-semibold border-b-2 ${activeTab === 'plan' ? 'border-ft-blue text-ft-blue' : 'border-transparent text-slate-500'}`}>Plan</button>
+                                    <button onClick={() => setShowNotes(false)} className="px-3 text-slate-400 hover:text-slate-600"><i className="fa-solid fa-xmark"></i></button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto bg-slate-50/50 p-0">
+                                    {activeTab === 'notes' ? (
+                                        <textarea className="w-full h-full p-4 bg-yellow-50/50 resize-none outline-none text-sm text-slate-700" placeholder="Notes..."></textarea>
+                                    ) : (
+                                        <div className="p-4 space-y-2">
+                                            {selectedTools.length === 0 && <div className="text-center text-slate-400 text-xs py-10">Vide</div>}
+                                            {selectedTools.map((t, i) => (
+                                                <div key={i} className="flex items-center justify-between p-2 bg-white border border-slate-200 rounded-lg text-xs shadow-sm">
+                                                    <span className="truncate pr-2 font-medium">{t.label}</span>
+                                                    <button onClick={() => toggleTool(t)} className="text-slate-300 hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
+                                                </div>
+                                            ))}
+                                            {selectedTools.length > 0 && <button onClick={copyPlan} className="w-full mt-4 bg-ft-blue text-white py-2 rounded-lg text-xs font-bold shadow">Copier la liste</button>}
+                                        </div>
+                                    )}
+                                </div>
+                            </aside>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
