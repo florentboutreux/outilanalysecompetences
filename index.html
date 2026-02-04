@@ -7,15 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
     
-    <!-- PDF.js CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script>
-        // Configuration Robuste du Worker PDF.js
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    </script>
-
     <style>
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background-color: #f0f4f8; }
+        body { font-family: 'Inter', system-ui, -apple-system, marianne; background-color: #f0f4f8; }
         .fade-in { animation: fadeIn 0.5s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
@@ -88,30 +81,16 @@
                         class="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition shadow-inner resize-none"></textarea>
                 </div>
 
-                <!-- Métiers Antérieurs avec Upload CV -->
+                <!-- Métiers Antérieurs (Saisie seule) -->
                 <div>
                     <div class="flex justify-between items-end mb-2">
                         <label for="pastJobs" class="block text-lg font-semibold text-gray-700">
                             2. Expériences passées
                         </label>
-                        
-                        <!-- Input File caché et Bouton stylisé -->
-                        <input type="file" id="cvInput" accept=".pdf" class="hidden" onchange="handleCvUpload(this)">
-                        <button onclick="document.getElementById('cvInput').click()" 
-                            class="text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1.5 rounded-md border border-blue-200 transition flex items-center gap-2 font-medium">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                            Importer un CV (PDF)
-                        </button>
                     </div>
                     
-                    <div id="cvLoading" class="hidden text-sm text-blue-600 mb-2 flex items-center bg-blue-50 p-2 rounded">
-                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        <span>Analyse du fichier en cours...</span>
-                    </div>
-
-                    <textarea id="pastJobs" rows="8" placeholder="Saisissez vos expériences ou importez votre CV pour remplir ce champ automatiquement..."
+                    <textarea id="pastJobs" rows="8" oninput="checkInputStatus()" placeholder="Copiez-collez ici vos expériences professionnelles, vos diplômes ou le contenu de votre CV..."
                         class="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition shadow-inner resize-none"></textarea>
-                    <p class="text-xs text-gray-500 mt-1 text-right">Le contenu du CV sera ajouté ci-dessus.</p>
                 </div>
 
                 <!-- Bouton d'Analyse -->
@@ -145,11 +124,10 @@
                 <!-- Bouton Suggestions CV -->
                 <div class="bg-white p-6 rounded-xl shadow-md border border-indigo-100 flex flex-col">
                     <h4 class="font-bold text-lg text-indigo-900 mb-2">Optimisation du CV</h4>
-                    <p class="text-gray-600 text-sm mb-4 flex-grow">Obtenez des suggestions concrètes pour adapter le CV actuel au poste visé.</p>
+                    <p class="text-gray-600 text-sm mb-4 flex-grow">Obtenez des suggestions concrètes pour adapter votre texte actuel au poste visé.</p>
                     <button id="btnCvAdvice" onclick="getAdvice('cv')" disabled
                         class="w-full py-3 bg-indigo-50 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-100 transition border border-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">
                         Améliorer mon CV
-                        <span id="cvBadge" class="block text-xs font-normal mt-1">(Nécessite l'import d'un CV)</span>
                     </button>
                 </div>
 
@@ -271,6 +249,7 @@
         // Initialisation de l'état
         document.addEventListener('DOMContentLoaded', () => {
             updateApiStatusUI();
+            checkInputStatus(); // Check initial au cas où le navigateur remplit le champ
         });
 
         function updateApiStatusUI() {
@@ -327,148 +306,22 @@
             }
         }
 
-        // Marqueur interne pour détecter l'import CV
-        const CV_MARKER = "--- CONTENU CV (Restructuré par IA) ---";
-
-        // --- GESTION UPLOAD CV (PDF) ---
-        async function handleCvUpload(input) {
-            const file = input.files[0];
-            if (!file) return;
-
-            if (file.type !== 'application/pdf') {
-                alert("Veuillez sélectionner un fichier PDF valide.");
-                return;
-            }
-
-            // Vérif API Key avant
-            if (!getEffectiveApiKey()) {
-                openApiKeyModal();
-                input.value = '';
-                return;
-            }
-
-            const loadingDiv = document.getElementById('cvLoading');
-            const textarea = document.getElementById('pastJobs');
-            const loadingText = loadingDiv.querySelector('span');
-            
-            loadingDiv.classList.remove('hidden');
-            loadingText.textContent = "Extraction du texte...";
-            textarea.disabled = true;
-
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                const typedarray = new Uint8Array(arrayBuffer);
-                const loadingTask = pdfjsLib.getDocument(typedarray);
-                
-                loadingTask.onPassword = function (updatePassword, reason) {
-                    const password = prompt(reason === 1 ? 'Ce PDF est protégé par mot de passe. Entrez le mot de passe :' : 'Mot de passe incorrect.');
-                    updatePassword(password);
-                };
-
-                const pdf = await loadingTask.promise;
-                let fullText = "";
-                let hasText = false;
-
-                // 1. Extraction technique
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    loadingText.textContent = `Lecture page ${i}/${pdf.numPages}...`;
-                    const page = await pdf.getPage(i);
-                    const textContent = await page.getTextContent();
-                    const pageText = textContent.items
-                        .map(item => item.str)
-                        .filter(str => str.trim().length > 0)
-                        .join(' ');
-                    
-                    if (pageText.length > 50) hasText = true;
-                    fullText += pageText + "\n\n";
-                }
-
-                if (!hasText) throw new Error("EMPTY_OR_SCANNED_PDF");
-
-                // 2. Nettoyage par IA
-                loadingText.textContent = "IA : Restructuration et nettoyage du CV...";
-                
-                let finalText = "";
-                try {
-                    finalText = await cleanCvWithAI(fullText);
-                } catch (aiError) {
-                    console.warn("Échec nettoyage IA, utilisation texte brut", aiError);
-                    finalText = fullText; // Fallback
-                }
-
-                // 3. Mise à jour de l'interface
-                const currentVal = textarea.value.trim();
-                const cleanVal = currentVal.split(CV_MARKER)[0].trim();
-                textarea.value = (cleanVal ? cleanVal + "\n\n" : "") + CV_MARKER + "\n\n" + finalText;
-                
-                textarea.classList.add('ring-2', 'ring-green-500');
-                setTimeout(() => textarea.classList.remove('ring-2', 'ring-green-500'), 1000);
-
-            } catch (error) {
-                console.error("Erreur PDF:", error);
-                let msg = "Impossible de lire ce fichier PDF.";
-                if (error.message === "EMPTY_OR_SCANNED_PDF") msg = "Ce PDF semble être une image (scan) et ne contient pas de texte lisible.";
-                alert(msg);
-            } finally {
-                loadingDiv.classList.add('hidden');
-                textarea.disabled = false;
-                input.value = ''; 
-                checkCvStatus();
-            }
-        }
-
-        async function cleanCvWithAI(rawText) {
-            const safeRawText = rawText.substring(0, 12000);
-            
-            const prompt = `
-            Tu es un assistant administratif. Voici le texte brut extrait d'un fichier PDF de CV :
-            """${safeRawText}"""
-            
-            TACHE : Réécris ce contenu proprement.
-            1. Liste les expériences professionnelles (Poste, Entreprise, Dates, Missions).
-            2. Liste les formations.
-            3. Supprime le texte inutile.
-            4. Utilise un formatage simple avec des tirets (-).
-            Réponds uniquement avec le texte nettoyé.`;
-
-            const payload = {
-                contents: [{ parts: [{ text: prompt }] }]
-            };
-
-            const response = await fetch(getApiUrl(), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) throw new Error("Erreur API Nettoyage");
-            
-            const data = await response.json();
-            const cleaned = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            
-            if (!cleaned) throw new Error("Réponse IA vide");
-            
-            return cleaned.trim();
-        }
-
-        function checkCvStatus() {
+        // Activation du bouton d'aide CV selon le contenu
+        function checkInputStatus() {
             const content = document.getElementById('pastJobs').value;
             const btnCv = document.getElementById('btnCvAdvice');
-            const cvBadge = document.getElementById('cvBadge');
             
-            if (content.includes("CONTENU CV") || content.length > 50) {
+            // On active si l'utilisateur a tapé un minimum de texte (ex: 50 caractères)
+            if (content.length > 50) {
                 btnCv.disabled = false;
                 btnCv.classList.remove('bg-gray-100', 'text-gray-400');
                 btnCv.classList.add('bg-indigo-50', 'text-indigo-600');
-                cvBadge.style.display = 'none';
-                btnCv.innerHTML = `Améliorer mon CV <span class="ml-2 text-green-600">✔ CV détecté</span>`;
             } else {
                 btnCv.disabled = true;
-                cvBadge.style.display = 'block';
-                btnCv.innerHTML = `Améliorer mon CV <span id="cvBadge" class="block text-xs font-normal mt-1">(Nécessite l'import d'un CV)</span>`;
+                btnCv.classList.add('bg-gray-100', 'text-gray-400');
+                btnCv.classList.remove('bg-indigo-50', 'text-indigo-600');
             }
         }
-
 
         // --- LOGIQUE ANALYSE PRINCIPALE ---
         const SYSTEM_PROMPT = `
@@ -553,7 +406,7 @@
                 displayResults(resultObj);
                 
                 furtherActions.classList.remove('hidden');
-                checkCvStatus();
+                checkInputStatus();
 
             } catch (err) {
                 console.error(err);
@@ -596,7 +449,7 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
                             </div>
                             <h3 class="font-bold text-blue-800 flex items-center mb-3">
-                                🛠️ Savoir-Faire (Hard Skills)
+                                Savoir-Faire (Hard Skills)
                             </h3>
                             ${makeList(data.savoirFaireTechniques, 'bg-blue-500')}
                             <p class="text-xs text-blue-400 mt-3 text-center opacity-0 group-hover:opacity-100 transition-opacity font-semibold">Cliquez pour le détail technique</p>
@@ -608,7 +461,7 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
                             </div>
                             <h3 class="font-bold text-green-800 flex items-center mb-3">
-                                🤝 Savoir-Être (Soft Skills)
+                                Savoir-Être (Soft Skills)
                             </h3>
                             ${makeList(data.savoirEtreTransferables, 'bg-green-500')}
                             <p class="text-xs text-green-500 mt-3 text-center opacity-0 group-hover:opacity-100 transition-opacity font-semibold">Cliquez pour voir des exemples</p>
@@ -620,7 +473,7 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
                             </div>
                             <h3 class="font-bold text-orange-800 flex items-center mb-3">
-                                🚀 À Développer (Gaps)
+                                À Développer 
                             </h3>
                             ${makeList(data.skillsGap, 'bg-orange-500')}
                             <p class="text-xs text-orange-500 mt-3 text-center opacity-0 group-hover:opacity-100 transition-opacity font-semibold">Cliquez pour analyser les écarts</p>
@@ -632,7 +485,7 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
                             </div>
                             <h3 class="font-bold text-purple-800 flex items-center mb-3">
-                                🎓 Besoins de Formation
+                                Besoins de Formation
                             </h3>
                             ${makeList(data.besoinsFormation, 'bg-purple-500')}
                             <p class="text-xs text-purple-500 mt-3 text-center opacity-0 group-hover:opacity-100 transition-opacity font-semibold">Cliquez pour voir les titres RNCP</p>
@@ -675,7 +528,7 @@
 
             switch(category) {
                 case 'savoir_faire':
-                    titleText = "🛠️ Analyse détaillée : Savoir-Faire Techniques";
+                    titleText = "Analyse détaillée : Savoir-Faire Techniques";
                     headerColor = "bg-blue-50";
                     prompt = `Tu es un expert métier pour le poste de : ${targetJob}.
                     Expériences du candidat : ${pastJobs.substring(0, 5000)}.
@@ -686,7 +539,7 @@
                     Réponds en HTML simple (<h3>, <ul>, <li>, <strong>).`;
                     break;
                 case 'savoir_etre':
-                    titleText = "🤝 Analyse détaillée : Savoir-Être (Soft Skills)";
+                    titleText = "Analyse détaillée : Savoir-Être (Soft Skills)";
                     headerColor = "bg-green-50";
                     prompt = `Tu es coach RH. Poste visé : ${targetJob}.
                     Détaille les SAVOIR-ÊTRE (Soft Skills) requis.
@@ -694,7 +547,7 @@
                     Réponds en HTML simple.`;
                     break;
                 case 'gaps':
-                    titleText = "🚀 Analyse détaillée : Écarts à combler";
+                    titleText = "Analyse détaillée : Écarts à combler";
                     headerColor = "bg-orange-50";
                     prompt = `Tu es conseiller en évolution. Poste visé : ${targetJob}.
                     Expériences : ${pastJobs.substring(0, 5000)}.
@@ -703,7 +556,7 @@
                     Réponds en HTML simple.`;
                     break;
                 case 'formation':
-                    titleText = "🎓 Analyse détaillée : Plan de Formation";
+                    titleText = "Analyse détaillée : Plan de Formation";
                     headerColor = "bg-purple-50";
                     prompt = `Tu es expert en formation France Travail. Poste visé : ${targetJob}.
                     Suggère des formations précises pour combler les manques.
@@ -765,12 +618,12 @@
             let color = "";
 
             if (type === 'cv') {
-                title = "📌 Propositions d'amélioration pour le CV";
+                title = "Propositions d'amélioration pour le CV";
                 color = "text-indigo-800";
                 prompt = `Expert RH. Profil : ${pastJobs.substring(0, 5000)}. Poste : ${targetJob}.
                 Donne 3 à 5 recommandations concrètes pour le CV (mots-clés, structure). HTML simple.`;
             } else {
-                title = "🎙️ Arguments clés pour l'entretien";
+                title = "Arguments clés pour l'entretien";
                 color = "text-teal-800";
                 prompt = `Coach recrutement. Poste : ${targetJob}. Profil : ${pastJobs.substring(0, 5000)}.
                 3 à 5 punchlines/arguments pour l'entretien. HTML simple.`;
